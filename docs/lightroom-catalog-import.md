@@ -62,7 +62,8 @@ is also available through `library.importLightroom {"status":true}` during that 
 
 Original files are referenced in place. Ratings, picks/rejects, color labels, XMP metadata,
 hierarchical keywords, regular collections/collection sets, virtual copies and mapped develop
-settings are imported. Missing originals remain catalogued for relinking, count as added records and are reported
+settings are imported. Keywords keep their hierarchy (`parent|child`) without Lightroom's hidden root keyword, the
+catalog's only keyword without a parent, even when the catalog gives that root a name. Missing originals remain catalogued for relinking, count as added records and are reported
 separately from failures reading files that are present. Known-missing originals are not probed
 again. Previously browsed Local records join All Photos even when their originals are offline;
 their promotion is counted once and undone together with the catalog import.
