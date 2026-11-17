@@ -560,6 +560,14 @@ fn read_file(path: &Path, document: &Path, source: &Path, cancel: &AtomicBool, d
     done.fetch_add(1, Ordering::Relaxed);
     let metadata: HashMap<_, _> = metadata_rows.into_iter().map(|r| (number(&r, "image"), r)).collect();
     let keyword_rows: HashMap<_, _> = optional_table("AgLibraryKeyword", &mut warnings)?.into_iter().map(|r| (number(&r, "id_local"), r)).collect();
+    // Lightroom's hidden root keyword: the only one without a parent, above every top-level keyword. Some
+    // catalogs give it a name, but nobody assigned it, so it never prefixes theirs. A catalog with several
+    // parentless keywords has no single root and keeps every name.
+    let mut parentless = keyword_rows.iter().filter(|(_, k)| number(k, "parent") == 0).map(|(id, _)| *id);
+    let root = match (parentless.next(), parentless.next()) {
+        (Some(id), None) => Some(id),
+        _ => None,
+    };
     let mut keywords: HashMap<i64, Vec<String>> = HashMap::new();
     for r in optional_table("AgLibraryKeywordImage", &mut warnings)? {
         ensure_read_active(cancel)?;
@@ -572,7 +580,7 @@ fn read_file(path: &Path, document: &Path, source: &Path, cancel: &AtomicBool, d
             }
             let Some(k) = keyword_rows.get(&at) else { break };
             let name = text(k, "name");
-            if !name.is_empty() {
+            if !name.is_empty() && root != Some(at) {
                 parts.push(name.to_string());
             }
             at = number(k, "parent");

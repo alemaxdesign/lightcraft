@@ -1510,6 +1510,33 @@ fn reads_native_sqlite_tables_without_lightroom_or_external_processes() {
     std::fs::remove_file(path).unwrap();
 }
 
+/// The keywords of the one photo of a catalog whose `AgLibraryKeyword` rows are `keywords` (`(name, parent)`,
+/// ids from 1) and whose photo carries `tags`.
+fn imported_keywords(keywords: &[(&str, Option<i64>)], tags: &[i64]) -> Vec<String> {
+    use SqlValue::{Integer as I, Null as N, Text as T};
+    let mut tables: Vec<_> = photo_tables(("/catalog/", "")).into_iter().map(|(name, columns, row)| (name, columns, vec![row])).collect();
+    let rows = keywords.iter().map(|(name, parent)| vec![N, T((*name).into()), parent.map_or(N, I)]).collect();
+    tables.push(("AgLibraryKeyword", "id_local INTEGER PRIMARY KEY, name, parent", rows));
+    tables.push(("AgLibraryKeywordImage", "id_local INTEGER PRIMARY KEY, image, tag", tags.iter().map(|t| vec![N, I(1), I(*t)]).collect()));
+    let path = std::env::temp_dir().join(format!("lightcraft-root-keyword-{}-{}.lrcat", std::process::id(), keywords.len()));
+    std::fs::write(&path, native_catalog_rows(&tables, None)).unwrap();
+    let catalog = read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(catalog.photos.len(), 1);
+    catalog.photos[0].keywords.clone()
+}
+
+/// Lightroom keeps one hidden root keyword, the only one without a parent, above every top-level keyword. Some
+/// catalogs give it a name; it is not a keyword anyone assigned, so it must not prefix every imported keyword.
+#[test]
+fn the_named_root_keyword_does_not_prefix_imported_keywords() {
+    let named_root = [("Autumn Roots", None), ("Family", Some(1)), ("Ada Example", Some(2)), ("Travel", Some(1))];
+    assert_eq!(imported_keywords(&named_root, &[3, 4]), vec!["Family|Ada Example", "Travel"]);
+    // several parentless keywords: no single root, every name is kept
+    let no_root = [("Family", None), ("Ada Example", Some(1)), ("Travel", None)];
+    assert_eq!(imported_keywords(&no_root, &[2, 3]), vec!["Family|Ada Example", "Travel"]);
+}
+
 /// Reads `tables` as a catalog file and returns what the reader made of it.
 fn read_tables(tables: &[(&str, &str, Vec<Vec<SqlValue>>)], name: &str) -> CatalogImport {
     let path = std::env::temp_dir().join(format!("lightcraft-{name}-{}.lrcat", std::process::id()));
