@@ -13,6 +13,11 @@ LightCraft has no command that lists face names, so `face_names.py list` reads t
 then `photo.inspect`), which takes a minute or two on 5,000 photos. It changes nothing. The merges themselves are the
 app's own Rename Person (`faces.renamePerson {from, to, merge: true}`).
 
+**Decisions already taken** (for every family library) and the full runbook (seeding reference faces, first names,
+maiden-married names, faces to check) live outside the repository, because they hold family names:
+`/Volumes/PhotoEditing/lightcraft-work/face-names/` (`RUNBOOK.md`, `name_map.json`). Read them first, and apply
+`name_map.json`'s `rename` before proposing anything new.
+
 ## Rules
 
 - **Names only.** A merge changes face names in the library's catalog. No photo, file, sidecar or NAS folder is written.
