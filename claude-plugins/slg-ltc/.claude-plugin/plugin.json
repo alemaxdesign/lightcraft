@@ -1,0 +1,9 @@
+{
+  "name": "slg-ltc",
+  "description": "Personal LightCraft skills for slg982009. Each skill is invoked as /slg-ltc:<name>.",
+  "author": {
+    "name": "slg982009"
+  },
+  "license": "MIT",
+  "version": "0.1.0"
+}
