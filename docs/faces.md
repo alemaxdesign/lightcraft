@@ -235,6 +235,13 @@ The detector's output matches OpenCV's own YuNet on a 45-photo public-domain tes
 mean box overlap 0.97), including marble busts and paintings, with no false boxes on the landscape and architecture
 photos in the set.
 
+**Photo ▸ Draw Face Box** (`photo.drawFaceBox`) draws a box by hand, for a face the detector missed (small, in profile,
+blurred, an old print). Choose it with a photo open: the loupe shows the face boxes and the pointer becomes a crosshair.
+Drag across the face; on release the box is added (`photo.addRegion`, one undo step, catalog only, never written to a
+sidecar) and its name box opens, so you type the name and press Enter. The box can then be moved, resized or removed like
+any other. A drag of under 12 pixels either way draws nothing; Escape, or the menu item again, leaves the mode. The
+box is one you drew, so Detect Faces never replaces it, and recognition picks it up like any other face.
+
 ## Suggesting who is in a photo
 
 With **Recognise faces** switched on in Settings ▸ Faces and a recognition model chosen (**Use**; the switch cannot be

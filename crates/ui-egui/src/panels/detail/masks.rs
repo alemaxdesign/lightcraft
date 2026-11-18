@@ -235,6 +235,52 @@ pub(super) fn region_overlay(
     edit
 }
 
+/// Photo ▸ Draw Face Box: a drag on the photo draws a new box, shown while it is drawn and reported once,
+/// on release, in the upright frame regions are stored in (`orient` is undone). The box stays inside the
+/// photo; a drag under 12 px either way draws nothing, so a click doesn't leave a speck of a box.
+pub(super) fn region_draw(ui: &egui::Ui, p: &egui::Painter, map: &CanvasMap, orient: lightcraft_geom::Orientation) -> Option<lightcraft_geom::Rect> {
+    let key = egui::Id::unique("region-draw");
+    let photo = Rect::from_two_pos(map.screen(Point::new(0.0, 0.0)), map.screen(Point::new(1.0, 1.0)));
+    let area = photo.intersect(p.clip_rect());
+    if !area.is_positive() {
+        return None;
+    }
+    // laid out after the boxes, so a drag anywhere on the photo draws (even over another box)
+    let resp = ui.interact(area, key, Sense::drag());
+    crate::widgets::announce(&resp, crate::i18n::tr("Drag to draw a face box"));
+    register(ui, "canvas:drawFaceBox", area);
+    if resp.hovered() || resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+    if resp.drag_started() {
+        let start = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos()).unwrap_or(area.center());
+        ui.data_mut(|d| d.insert_temp(key, start));
+    }
+    let start: Option<Pos2> = ui.data(|d| d.get_temp(key));
+    let (Some(start), Some(now)) = (start, resp.interact_pointer_pos()) else {
+        return None;
+    };
+    let shown = Rect::from_two_pos(start.clamp(photo.min, photo.max), now.clamp(photo.min, photo.max));
+    if !resp.drag_stopped() {
+        p.rect_stroke(shown.expand(1.0), 0.0, Stroke::new(1.0, Color32::from_black_alpha(190)), StrokeKind::Outside);
+        p.rect_stroke(shown, 0.0, Stroke::new(1.5, Color32::from_rgb(120, 190, 255)), StrokeKind::Outside);
+        ui.ctx().request_repaint();
+        return None;
+    }
+    ui.data_mut(|d| d.remove_temp::<Pos2>(key));
+    if shown.width() < 12.0 || shown.height() < 12.0 {
+        return None;
+    }
+    let (a, b) = (map.norm(shown.min), map.norm(shown.max));
+    let drawn = lightcraft_geom::Rect {
+        x0: a.x.min(b.x).clamp(0.0, 1.0),
+        y0: a.y.min(b.y).clamp(0.0, 1.0),
+        x1: a.x.max(b.x).clamp(0.0, 1.0),
+        y1: a.y.max(b.y).clamp(0.0, 1.0),
+    };
+    Some(orient.inverse().map_norm_rect(drawn))
+}
+
 // ------------------------------------------------------------------------ masks
 
 /// Where a mask component's pin sits (normalized), for shapes that have a place on the photo: an
@@ -1020,5 +1066,44 @@ mod region_drag_tests {
         assert!(((moved.y1 - moved.y0) - 0.2).abs() < 0.02, "height kept: {moved:?}");
         assert!((moved.x0 - 0.3).abs() < 0.02 && (moved.y0 - 0.25).abs() < 0.02, "moved by the drag: {moved:?}");
         assert!(moved.x0 >= 0.0 && moved.y0 >= 0.0 && moved.x1 <= 1.0 && moved.y1 <= 1.0, "inside the photo: {moved:?}");
+    }
+
+    /// Photo ▸ Draw Face Box: a drag on the photo reports the drawn box once, on release, kept inside the
+    /// photo; a drag too small to be a box reports nothing.
+    #[test]
+    fn a_drawn_face_box_is_reported_on_release_inside_the_photo() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        crate::theme::apply(&ctx);
+        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 400.0));
+        let frame = lightcraft_pipeline::geometry::Frame::new(100, 100, &DevelopSettings::default(), true);
+        let map = CanvasMap::new(&frame, canvas);
+        let run_frame = |events: &[egui::Event]| -> Option<lightcraft_geom::Rect> {
+            let mut drawn = None;
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), events: events.to_vec(), ..Default::default() }, |ui| {
+                egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+                    let p = ui.painter_at(canvas);
+                    drawn = region_draw(ui, &p, &map, lightcraft_geom::Orientation::Normal);
+                });
+            });
+            output.textures_delta.clear();
+            drawn
+        };
+        let press =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        // from (80, 120) to past the photo's right edge: 20 %..100 % across, 30 %..50 % down
+        run_frame(&[egui::Event::PointerMoved(pos2(80.0, 120.0))]);
+        run_frame(&[press(pos2(80.0, 120.0), true)]);
+        assert!(run_frame(&[egui::Event::PointerMoved(pos2(200.0, 160.0))]).is_none(), "nothing is reported while drawing");
+        run_frame(&[egui::Event::PointerMoved(pos2(450.0, 200.0))]);
+        let drawn = run_frame(&[press(pos2(450.0, 200.0), false)]);
+        let Some(r) = drawn else { panic!("the box is reported on release") };
+        assert!((r.x0 - 0.2).abs() < 0.01 && (r.y0 - 0.3).abs() < 0.01, "{r:?}");
+        assert!((r.x1 - 1.0).abs() < 1e-6 && (r.y1 - 0.5).abs() < 0.01, "clamped to the photo: {r:?}");
+        // a click, or a drag of a few pixels, draws nothing
+        run_frame(&[egui::Event::PointerMoved(pos2(300.0, 300.0))]);
+        run_frame(&[press(pos2(300.0, 300.0), true)]);
+        run_frame(&[egui::Event::PointerMoved(pos2(306.0, 330.0))]);
+        assert!(run_frame(&[press(pos2(306.0, 330.0), false)]).is_none(), "a box under 12 px wide is not drawn");
     }
 }

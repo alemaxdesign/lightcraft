@@ -129,6 +129,9 @@ pub struct UiState {
     /// A face's name being typed in the loupe.
     #[serde(skip)]
     pub name_edit: Option<NameEdit>,
+    /// Photo ▸ Draw Face Box: the next drag on the photo in the loupe draws a face box (then off again).
+    #[serde(skip)]
+    pub draw_face_box: bool,
     /// The person whose page the People view shows (their faces and the faces that look like them); `None`: everyone.
     #[serde(skip)]
     pub person_page: Option<String>,
@@ -442,6 +445,7 @@ impl Default for UiState {
             sidebar: Default::default(),
             collapsed_sidebar: Vec::new(),
             name_edit: None,
+            draw_face_box: false,
             person_page: None,
             person_from: None,
             last_person: None,
