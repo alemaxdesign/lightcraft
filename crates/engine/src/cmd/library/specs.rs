@@ -29,6 +29,24 @@ fn next_seed(prev: u64, now: &str) -> u64 {
     (lightcraft_catalog::mix64(prev.wrapping_add(1)) ^ t) & (MAX_SEED - 1)
 }
 
+/// The most regions a hand-drawn box may bring a photo to (a group photo has far fewer faces).
+const MAX_REGIONS: usize = 500;
+
+/// `rect` of a region command: four finite numbers, normalized, corners in any order, clamped to
+/// the photo and at least 0.5 % each way.
+fn region_rect(p: &Value, cmd: &str) -> Result<lightcraft_geom::Rect> {
+    let r = p.get("rect").ok_or_else(|| bad(cmd, "missing `rect`"))?;
+    let num =
+        |k: &str| r.get(k).and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, format!("`rect.{k}` must be a finite number")));
+    let (a, b, c, d) = (num("x0")?, num("y0")?, num("x1")?, num("y1")?);
+    let (x0, x1) = (a.min(c).clamp(0.0, 1.0), a.max(c).clamp(0.0, 1.0));
+    let (y0, y1) = (b.min(d).clamp(0.0, 1.0), b.max(d).clamp(0.0, 1.0));
+    if x1 - x0 < 0.005 || y1 - y0 < 0.005 {
+        return Err(bad(cmd, "the box would be too small"));
+    }
+    Ok(lightcraft_geom::Rect { x0, y0, x1, y1 })
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         // ---- view source / filter / sort
@@ -635,22 +653,42 @@ pub fn specs() -> Vec<CommandSpec> {
                     .and_then(Value::as_u64)
                     .and_then(|i| usize::try_from(i).ok())
                     .ok_or_else(|| bad(C, "missing or invalid `index`"))?;
-                let r = p.get("rect").ok_or_else(|| bad(C, "missing `rect`"))?;
-                let num = |k: &str| {
-                    r.get(k).and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(C, format!("`rect.{k}` must be a finite number")))
-                };
-                let (a, b, c, d) = (num("x0")?, num("y0")?, num("x1")?, num("y1")?);
-                let (x0, x1) = (a.min(c).clamp(0.0, 1.0), a.max(c).clamp(0.0, 1.0));
-                let (y0, y1) = (b.min(d).clamp(0.0, 1.0), b.max(d).clamp(0.0, 1.0));
-                if x1 - x0 < 0.005 || y1 - y0 < 0.005 {
-                    return Err(bad(C, "the box would be too small"));
-                }
+                let rect = region_rect(p, C)?;
                 let mut meta = s.catalog.photo(id).ok_or_else(|| bad(C, "no such photo"))?.meta.clone();
                 let region = meta.regions.get_mut(index).ok_or_else(|| bad(C, "no such region"))?;
-                region.rect = lightcraft_geom::Rect { x0, y0, x1, y1 };
+                region.rect = rect;
                 s.commit("Resize Face Box", Op::SetMeta { id, meta: Box::new(meta) })?;
                 s.skip_auto_write = true;
-                Ok(json!({"rect": {"x0": x0, "y0": y0, "x1": x1, "y1": y1}}))
+                Ok(json!({"rect": {"x0": rect.x0, "y0": rect.y0, "x1": rect.x1, "y1": rect.y1}}))
+            }
+        ),
+        cmd!(
+            "photo.addRegion",
+            "Add Face Box",
+            [],
+            None,
+            "{id?, rect: {x0, y0, x1, y1}, kind?: face|pet (default face), name?} → {index} — add a face / pet region drawn by hand (normalized, in the photo's upright frame; clamped to the photo, at least 0.5 % each way) to the photo in the catalog, after its other regions; undoable. Like photo.setRegion it never rewrites the XMP sidecar",
+            always,
+            |s, p| {
+                const C: &str = "photo.addRegion";
+                let id = crate::cmd::photo_id(p, C)?.or_else(|| s.active()).ok_or_else(|| bad(C, "no photo"))?;
+                let rect = region_rect(p, C)?;
+                let kind = match p.get("kind").and_then(Value::as_str).unwrap_or("face") {
+                    "face" => lightcraft_meta::RegionKind::Face,
+                    "pet" => lightcraft_meta::RegionKind::Pet,
+                    other => return Err(bad(C, format!("unknown kind `{other}` (face|pet)"))),
+                };
+                let name = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+                let mut meta = s.catalog.photo(id).ok_or_else(|| bad(C, "no such photo"))?.meta.clone();
+                // a photo's regions are bounded like everything read from a file
+                if meta.regions.len() >= MAX_REGIONS {
+                    return Err(bad(C, format!("the photo already has {MAX_REGIONS} regions")));
+                }
+                meta.regions.push(lightcraft_meta::Region { rect, kind, name, description: None });
+                let index = meta.regions.len() - 1;
+                s.commit("Add Face Box", Op::SetMeta { id, meta: Box::new(meta) })?;
+                s.skip_auto_write = true;
+                Ok(json!({"index": index}))
             }
         ),
         // ---- delete / restore

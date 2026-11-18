@@ -847,6 +847,52 @@ fn resizing_a_region_validates_clamps_undoes_and_leaves_the_sidecar_alone() {
     let _ = std::fs::remove_dir_all(&src);
 }
 
+/// A face box drawn by hand is added after the photo's regions, as a catalog-only, undoable edit with
+/// strict input handling; it leaves the sidecar alone like resizing does.
+#[test]
+fn adding_a_region_validates_appends_undoes_and_leaves_the_sidecar_alone() {
+    let src = temp_dir("region-add");
+    write_png(&src.join("portrait.png"), 9);
+    std::fs::write(src.join("portrait.xmp"), MWG_REGIONS).unwrap();
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [src.to_string_lossy()]})).unwrap();
+    let id = s.active().unwrap();
+    s.execute("library.xmpPreferences", &json!({"autoWrite": true})).unwrap();
+    let before = std::fs::read(src.join("portrait.xmp")).unwrap();
+    let regions = |s: &Session| s.catalog.photo(id).unwrap().meta.regions.clone();
+    let original = regions(&s);
+    let add = |s: &mut Session, params: serde_json::Value| s.execute("photo.addRegion", &params);
+    // hostile input is an error and changes nothing
+    for bad in [
+        json!({}),
+        json!({"rect": {"x0": 0.1, "y0": 0.1, "x1": 0.1, "y1": 0.5}}),
+        json!({"rect": {"x0": 0.1, "y0": 0.1, "x1": 0.5}}),
+        json!({"rect": {"x0": "a", "y0": 0.1, "x1": 0.5, "y1": 0.5}}),
+        json!({"rect": {"x0": 0.1, "y0": 0.1, "x1": 0.5, "y1": 0.5}, "kind": "focus"}),
+    ] {
+        assert!(add(&mut s, bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(regions(&s), original);
+    // a face, its corners in any order and outside the photo, is clamped, named (trimmed) and appended
+    let r = add(&mut s, json!({"rect": {"x0": 0.6, "y0": 1.5, "x1": -0.2, "y1": 0.2}, "name": "  Ada Example "})).unwrap();
+    assert_eq!(r["index"], json!(original.len()));
+    let added = regions(&s).last().cloned().unwrap();
+    assert_eq!((added.rect.x0, added.rect.y0, added.rect.x1, added.rect.y1), (0.0, 0.2, 0.6, 1.0));
+    assert_eq!(added.kind, lightcraft_meta::RegionKind::Face);
+    assert_eq!(added.name.as_deref(), Some("Ada Example"));
+    // a pet, unnamed (a blank name is no name)
+    add(&mut s, json!({"rect": {"x0": 0.1, "y0": 0.1, "x1": 0.3, "y1": 0.3}, "kind": "pet", "name": " "})).unwrap();
+    let pet = regions(&s).last().cloned().unwrap();
+    assert_eq!((pet.kind, pet.name), (lightcraft_meta::RegionKind::Pet, None));
+    assert_eq!(regions(&s)[..original.len()], original[..], "the regions already there are unchanged");
+    assert_eq!(std::fs::read(src.join("portrait.xmp")).unwrap(), before, "the sidecar is untouched");
+    // each box is its own undo step
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(regions(&s), original);
+    let _ = std::fs::remove_dir_all(&src);
+}
+
 /// Re-reading a sidecar: one that has `mwg-rs:Regions` is authoritative, so an emptied region list
 /// clears the stale regions; one without `mwg-rs:Regions` (an app that doesn't do regions) leaves the
 /// photo's regions alone.

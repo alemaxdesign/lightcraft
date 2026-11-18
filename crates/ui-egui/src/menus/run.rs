@@ -359,6 +359,16 @@ fn ui_commands_2(app: &mut LightcraftApp, ctx: &egui::Context, id: &str, p: &Val
             app.ui.face_boxes = p.get("show").and_then(Value::as_bool).unwrap_or(!app.ui.face_boxes);
             Ok(json!({"show": app.ui.face_boxes}))
         }
+        "photo.drawFaceBox" => {
+            // {on?}; no params toggles. The next drag on the photo in the loupe draws a face box, then its
+            // name box opens; the boxes are shown, and the photo opens in the loupe, so the drag lands on it.
+            app.ui.draw_face_box = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.draw_face_box);
+            if app.ui.draw_face_box {
+                app.ui.face_boxes = true;
+                app.ui.view = ViewMode::Detail;
+            }
+            Ok(json!({"on": app.ui.draw_face_box}))
+        }
         "view.people" => {
             // Everyone; the page just left stays one click away (the chip next to the title)
             if let Some(name) = app.ui.person_page.take() {

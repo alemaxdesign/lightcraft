@@ -73,6 +73,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.people", "People", None, "View"),
     ("view.person", "Show Person", None, ""),
     ("view.faceBoxes", "Face Boxes", None, "View"),
+    ("photo.drawFaceBox", "Draw Face Box", None, "Photo"),
     ("view.focusPoint", "Focus Point", Some("Alt+F"), "View"),
     ("view.zoomToFocus", "Zoom to Focus Point", None, "View"),
     ("view.reference", "Reference View", Some("Shift+R"), "View"),

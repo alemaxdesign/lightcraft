@@ -53,7 +53,7 @@ use lens_blur::{lens_blur_brush_overlay, lens_blur_shape_overlay};
 use look_ahead::BEHIND;
 pub use look_ahead::LookAhead;
 pub(crate) use look_ahead::{Prepare, look_ahead};
-use masks::{RegionContext, RegionEdit, color_range_pick, mask_overlay, region_overlay};
+use masks::{RegionContext, RegionEdit, color_range_pick, mask_overlay, region_draw, region_overlay};
 use retouch::{eye_overlay, remove_overlay};
 pub(crate) use window::overlay_supports_window;
 use window::{WindowCtx, WindowView, draw_window, request_window};
@@ -460,6 +460,19 @@ fn face_boxes(
             let _ = app.run("photo.setRegion", json!({"id": id.0, "index": index, "rect": {"x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1}}));
         }
         None => {}
+    }
+    // Photo ▸ Draw Face Box: the drag draws one box, which is added and gets its name box straight away
+    if app.ui.draw_face_box && movable {
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            app.ui.draw_face_box = false;
+        } else if let Some(r) = region_draw(ui, p, map, d.orientation) {
+            app.ui.draw_face_box = false;
+            if let Ok(v) = app.run("photo.addRegion", json!({"id": id.0, "rect": {"x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1}}))
+                && let Some(index) = v.get("index").and_then(serde_json::Value::as_u64).and_then(|i| usize::try_from(i).ok())
+            {
+                app.ui.name_edit = Some(crate::state::NameEdit { photo: id.0, index, text: String::new(), fresh: true });
+            }
+        }
     }
 }
 
