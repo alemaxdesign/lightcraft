@@ -1,0 +1,16 @@
+{
+  "name": "slg-ltc",
+  "owner": {
+    "name": "slg982009"
+  },
+  "metadata": {
+    "description": "Local marketplace for slg982009's personal Claude Code plugin."
+  },
+  "plugins": [
+    {
+      "name": "slg-ltc",
+      "source": "./slg-ltc",
+      "description": "Personal LightCraft skills for slg982009."
+    }
+  ]
+}
