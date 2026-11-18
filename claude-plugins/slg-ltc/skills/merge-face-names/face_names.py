@@ -60,7 +60,7 @@ def fold(s):
 
 
 def close(a, b):
-    """At most one letter added, removed or changed (Rafiian / Raffiian, Moran / Morian)."""
+    """At most one letter added, removed or changed (Exampel / Example, Smith / Smyth)."""
     if abs(len(a) - len(b)) > 1:
         return False
     if len(a) > len(b):

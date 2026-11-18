@@ -22,7 +22,7 @@ maiden-married names, faces to check) live outside the repository, because they 
 
 - **Names only.** A merge changes face names in the library's catalog. No photo, file, sidecar or NAS folder is written.
 - **The user decides every merge.** The script's groups are a heuristic. A first name shared by several people
-  (Nicolas, Albane, Catherine…) is never merged as a whole: leave it, or settle it face by face on the person's page.
+  (a common first name such as "Ada") is never merged as a whole: leave it, or settle it face by face on the person's page.
 - **The curated spellings win.** When pictures-library is reachable (ListAgents: the session named "Document reading
   request" or pictures-library), send it the proposal and use the canonical names it returns.
 - **One merge, one undo step.** Each can be undone with Cmd+Z in the app.
@@ -43,7 +43,7 @@ maiden-married names, faces to check) live outside the repository, because they 
    answers in. Where its stores disagree among themselves (accents, one spelling against another), ask the user.
 4. **Agree the plan with the user.** Write it as `[{"from": "...", "to": "..."}]` to
    `<work folder>/tmp/<library>_merge_plan.json`, one entry per name that goes away. A kept name that should change
-   spelling is an entry too (`"from": "Damien Ramos", "to": "Damian Ramos"`). Show the plan; apply only after the
+   spelling is an entry too (`"from": "Ada Exampel", "to": "Ada Example"`). Show the plan; apply only after the
    user's OK.
 5. **Apply.** Run `face_names.py apply <plan>`. It prints the faces and photos each merge touched, and FAILED with
    the reason for one that did not apply (a name that no longer exists, for instance).
