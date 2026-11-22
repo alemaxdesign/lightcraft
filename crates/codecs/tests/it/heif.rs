@@ -48,6 +48,26 @@ fn an_iphone_like_heic_decodes_upright_in_display_p3() {
     assert_eq!((h.format, h.width, h.height, h.orientation), (Format::Heif, 64, 96, 1));
 }
 
+/// A HEIC whose container is not turned and whose EXIF says Orientation 6, as some editors and
+/// converters write: macOS shows it turned, and so must we (it used to come out sideways).
+#[test]
+fn the_exif_orientation_counts_when_the_container_does_not_turn_the_photo() {
+    let bytes = build(&Spec { exif: Some(exif_orientation_6()), ..Spec::new(96, 64, &grey) });
+    let d = decode(&bytes, DecodeOptions::default()).unwrap();
+    assert_eq!((d.width, d.height, d.orientation), (96, 64, 6));
+    let h = read_header(&bytes).unwrap();
+    assert_eq!((h.width, h.height, h.orientation), (96, 64, 6));
+    // a small decode (the cataloguing probe's) says the same
+    assert_eq!(decode(&bytes, DecodeOptions::fit(32, 32)).unwrap().orientation, 6);
+    // a mirror in the container: the container decides, the tag is not applied again
+    let mirrored = build(&Spec { props: vec![Prop::Imir(0)], exif: Some(exif_orientation_6()), ..Spec::new(96, 64, &grey) });
+    assert_eq!(decode(&mirrored, DecodeOptions::default()).unwrap().orientation, 1);
+    assert_eq!(read_header(&mirrored).unwrap().orientation, 1);
+    // no EXIF at all: upright as coded
+    let plain = build(&Spec::new(96, 64, &grey));
+    assert_eq!((decode(&plain, DecodeOptions::default()).unwrap().orientation, read_header(&plain).unwrap().orientation), (1, 1));
+}
+
 #[test]
 fn a_small_decode_uses_the_embedded_thumbnail() {
     let bytes = iphone_like();
