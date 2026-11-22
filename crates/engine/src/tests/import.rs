@@ -2867,8 +2867,9 @@ fn a_heic_is_dated_by_its_exif_and_not_by_the_file() {
     let mut ifd0 = IfdBuilder::new();
     ifd0.set(t::MAKE, Value::Ascii("Apple".into()));
     ifd0.set(t::MODEL, Value::Ascii("iPhone 15 Pro".into()));
-    // HEIF turns the picture in the container; its Exif Orientation only mirrors that, so reading
-    // the Exif must not turn it a second time.
+    // This container has no `irot`, so the Exif Orientation is the photo's (as macOS reads it):
+    // 96 × 64 as coded, 64 × 96 shown. (With an `irot` the tag only repeats the container: see
+    // `heic_exif_orientation_does_not_rotate_the_picture_twice`.)
     ifd0.set(t::ORIENTATION, Value::Short(vec![6]));
     ifd0.set_child(t::EXIF_IFD, exif);
     let exif = TiffWriter::new(ByteOrder::Little, false).write(&[ifd0]).unwrap();
@@ -2886,7 +2887,7 @@ fn a_heic_is_dated_by_its_exif_and_not_by_the_file() {
         assert_eq!((ids(&r, "imported"), ids(&r, "failed")), (1, 0), "{r}");
         let p = s.catalog.photos().next().unwrap();
         assert_eq!(p.captured.as_deref(), Some("2026-10-18T13:00:00-05:00"), "the time the camera wrote, not the file's");
-        assert_eq!((p.width, p.height), (96, 64), "upright: the container's own transforms, not the Exif tag as well");
+        assert_eq!((p.width, p.height), (64, 96), "upright: an unturned container follows its Exif Orientation");
         assert_eq!(lightcraft_catalog::dates::display_time(p.date()), "October 18, 2026 at 1:00:00 PM");
     } else {
         assert!(info.is_err(), "without the feature a HEIC cannot be opened at all");
@@ -3219,19 +3220,28 @@ fn heic_camera_exif(date: &str) -> Vec<u8> {
 fn heic_exif_orientation_does_not_rotate_the_picture_twice() {
     use craft_heif::testdata::{Prop, Spec, build};
     let photo = |x: u32, y: u32| [((x * 7 + y * 13) % 200 + 30) as u16, 110, 150];
-    for (props, size) in [(vec![], (96, 64)), (vec![Prop::Irot(3)], (64, 96))] {
+    // With an `irot` the container turns the picture and the Exif tag only repeats it. Without any
+    // `irot` / `imir` the Exif tag is the only word on the orientation (editors and converters write
+    // such files, and macOS turns them by it), so it is applied, once.
+    for (props, header_orientation, size) in [(vec![], 6, (64, 96)), (vec![Prop::Irot(3)], 1, (64, 96))] {
+        let container_turns = !props.is_empty();
         let plain = build(&Spec { props: props.clone(), ..Spec::new(96, 64, &photo) });
         let bytes = build(&Spec { props, exif: Some(heic_camera_exif("2026:10:18 13:00:00")), ..Spec::new(96, 64, &photo) });
         assert_eq!(lightcraft_meta::extract(&bytes).orientation, Some(lightcraft_geom::Orientation::Rotate90));
         if lightcraft_codecs::Format::Heif.can_decode() {
             let header = lightcraft_codecs::read_header(&bytes).unwrap();
-            assert_eq!((header.width, header.height, header.orientation), (size.0, size.1, 1));
+            let shown = if container_turns { size } else { (96, 64) };
+            assert_eq!((header.width, header.height, header.orientation), (shown.0, shown.1, header_orientation));
             let info = crate::files::probe_bytes("rotated.HEIC", &bytes).unwrap();
             assert_eq!((info.width, info.height), size);
             let (image, _) = crate::files::load_bytes(&bytes, 96).unwrap();
             let (without_exif, _) = crate::files::load_bytes(&plain, 96).unwrap();
-            assert_eq!((image.width, image.height), (size.0 as usize, size.1 as usize));
-            assert_eq!(image.data, without_exif.data, "Exif must not turn the decoded pixels again");
+            if container_turns {
+                assert_eq!((image.width, image.height), (size.0 as usize, size.1 as usize));
+                assert_eq!(image.data, without_exif.data, "Exif must not turn the decoded pixels again");
+            } else {
+                assert_ne!(image.data, without_exif.data, "an unturned container: the Exif tag turns the picture");
+            }
         } else {
             assert!(crate::files::probe_bytes("rotated.HEIC", &bytes).unwrap_err().contains("isn't included in this build"));
             assert!(crate::files::load_bytes(&bytes, 96).unwrap_err().contains("isn't included in this build"));
