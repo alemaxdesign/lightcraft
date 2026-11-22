@@ -348,6 +348,8 @@ shot), so check a model on your own photos before trusting it:
 (ignoring shots taken within a few seconds of it, which would make it too easy) and reports, for each threshold, how many
 suggestions it would make and how many were right.
 
+`faces.doubtful` uses the same comparison the other way round: for each named face (of one person, or everyone) it asks who the face looks like from the *other* named faces, near-duplicates left out, and lists the ones where another person comes within `margin` (0.05) of the face's own person, or beats it. A suggestion is the mean of a person's two closest faces, so one wrongly named face (a mother named as her daughter) makes more look-alikes come out under the wrong name; this finds the wrong ones to fix.
+
 ## Face pictures in the People view
 
 Each face on a person card, in Unnamed faces and on a person's page is a square around the face, about 1.7 times the
@@ -383,7 +385,7 @@ reuses the pictures of its step instead of rendering every face again.
 
 All of this is reachable from the control channel, the CLI and MCP: `faces.models.list`, `faces.models.inspect {path}`,
 `faces.models.install {path, acknowledged: true, activate?}`, `faces.models.download {id, acknowledged: true}` (then `faces.models.downloads`, which also installs what has arrived, and `faces.models.downloadCancel {id}`), `faces.models.remove {id}`, `faces.models.select {id}`,
-`faces.enable {enabled?}`, `faces.detect {ids?, apply?}`, `faces.index {budgetMs?, ids?}`, `faces.pump` (what the app calls every frame), `faces.suggest {ids?, threshold?, margin?}`, `faces.person {name, more?}` (a person's faces and the unnamed faces that look like them), `faces.unnamed {limit?}` (every unnamed face, look-alikes together, with suggested names), `faces.setName {id?, index, name}`, `faces.nameFaces {faces: [{photo, index}], name}` (name many at once, one undo step), `faces.renamePerson {from, to, merge?}` (rename every in-library face of one person, or merge two when `merge` is true, one undo step) and `faces.evaluate`. `acknowledged` must be `true`: the caller has shown the user the terms and the user agreed. Installing makes the model the one in use and switches recognition on unless `activate` is `false`.
+`faces.enable {enabled?}`, `faces.detect {ids?, apply?}`, `faces.index {budgetMs?, ids?}`, `faces.pump` (what the app calls every frame), `faces.suggest {ids?, threshold?, margin?}`, `faces.person {name, more?}` (a person's faces and the unnamed faces that look like them), `faces.unnamed {limit?}` (every unnamed face, look-alikes together, with suggested names), `faces.setName {id?, index, name}`, `faces.nameFaces {faces: [{photo, index}], name}` (name many at once, one undo step), `faces.renamePerson {from, to, merge?}` (rename every in-library face of one person, or merge two when `merge` is true, one undo step) `faces.evaluate` and `faces.doubtful {name?, burstSecs?, margin?, limit?}` (the named faces that look as much like someone else as like their own person, worst first, with who they look like; reads only). `acknowledged` must be `true`: the caller has shown the user the terms and the user agreed. Installing makes the model the one in use and switches recognition on unless `activate` is `false`.
 
 ## Find Blemishes
 

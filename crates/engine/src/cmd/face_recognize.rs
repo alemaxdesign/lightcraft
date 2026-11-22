@@ -524,6 +524,101 @@ mod imp {
         Some(days * 86_400 + hh * 3600 + mm * 60 + ss)
     }
 
+    /// A named face with its embedding, where it is, and when its photo was taken.
+    struct Named {
+        name: String,
+        emb: Arc<[f32]>,
+        photo: PhotoId,
+        index: usize,
+        rect: Rect,
+        when: Option<i64>,
+    }
+
+    impl Named {
+        /// The same photo, or shots taken within `burst` seconds of each other (a burst, a RAW and its JPEG, a virtual
+        /// copy): near-duplicates that would make any face look like itself.
+        fn near(&self, other: &Named, burst: i64) -> bool {
+            self.photo == other.photo || matches!((self.when, other.when), (Some(x), Some(y)) if (x - y).abs() <= burst)
+        }
+    }
+
+    /// Every named face of the library's photos `in_scope` that has an embedding.
+    fn named_faces(s: &Session, in_scope: &dyn Fn(PhotoId) -> bool) -> Vec<Named> {
+        s.catalog
+            .photos()
+            .filter(|ph| ph.in_library() && in_scope(ph.id))
+            .flat_map(|ph| {
+                let when = ph.captured.as_deref().and_then(capture_secs);
+                ph.meta
+                    .regions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.kind == RegionKind::Face)
+                    .filter_map(|(index, r)| {
+                        let name = r.name.as_deref().map(str::trim).filter(|n| !n.is_empty())?.to_string();
+                        Some(Named { name, emb: s.faces.index.get(ph.id.0, &r.rect)?.clone(), photo: ph.id, index, rect: r.rect, when })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Most faces `faces.doubtful` returns.
+    const MAX_DOUBTFUL: usize = 2000;
+
+    /// `faces.doubtful {name?, burstSecs?, margin?, limit?}`: the named faces that look at least as much like someone
+    /// else as like the rest of their own person's faces, worst first. Each named face (of `name` only, when given) is
+    /// ranked against the other named faces as `faces.evaluate` does, near-duplicates of it left out; a face is doubtful
+    /// when another person's score comes within `margin` of its own person's, or beats it. Reads only: it finds a
+    /// mother's face named after her daughter, or a stranger confirmed in a batch, for the user to look at.
+    pub fn doubtful(s: &mut Session, p: &Value) -> Result<Value> {
+        const C: &str = "faces.doubtful";
+        current(s, C)?;
+        collect(s);
+        let only = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_lowercase);
+        let burst = p.get("burstSecs").and_then(Value::as_i64).unwrap_or(5).clamp(0, 86_400 * 7);
+        let margin = p.get("margin").and_then(Value::as_f64).filter(|v| v.is_finite()).map_or(0.05, |v| v.clamp(-1.0, 1.0) as f32);
+        let limit = p.get("limit").and_then(Value::as_u64).map_or(200, |n| usize::try_from(n).unwrap_or(MAX_DOUBTFUL)).clamp(1, MAX_DOUBTFUL);
+        let named = named_faces(s, &|_| true);
+        let queries: Vec<&Named> = named.iter().filter(|q| only.as_deref().is_none_or(|n| q.name.to_lowercase() == n)).collect();
+        // (one face against every other named face: on every core)
+        let found: Vec<Option<(f32, &Named, f32, String, f32)>> = queries
+            .par_iter()
+            .map(|q| {
+                let refs: Vec<(&str, &[f32])> = named.iter().filter(|g| !q.near(g, burst)).map(|g| (g.name.as_str(), &g.emb[..])).collect();
+                let ranked = matching::rank(&q.emb, &refs);
+                let own = ranked.iter().find(|r| r.name.eq_ignore_ascii_case(&q.name))?;
+                let other = ranked.iter().find(|r| !r.name.eq_ignore_ascii_case(&q.name))?;
+                let gap = other.score - own.score;
+                (gap >= -margin).then(|| (gap, *q, own.score, other.name.clone(), other.score))
+            })
+            .collect();
+        let unmatchable = queries.iter().filter(|q| !named.iter().any(|g| !q.near(g, burst) && g.name.eq_ignore_ascii_case(&q.name))).count();
+        let mut doubtful: Vec<(f32, &Named, f32, String, f32)> = found.into_iter().flatten().collect();
+        let total = doubtful.len();
+        doubtful.sort_by(|a, b| b.0.total_cmp(&a.0));
+        doubtful.truncate(limit);
+        let round = |v: f32| (f64::from(v) * 1000.0).round() / 1000.0;
+        Ok(json!({
+            "model": s.faces.index.tag,
+            "checked": queries.len(),
+            "unmatchable": unmatchable,
+            "total": total,
+            "margin": margin,
+            "burstSecs": burst,
+            "faces": doubtful.iter().map(|(gap, q, own, other, score)| json!({
+                "photo": q.photo.0,
+                "index": q.index,
+                "rect": super::rect_json(&q.rect),
+                "view": super::rect_json(&s.face_view(q.photo, q.rect)),
+                "name": q.name,
+                "own": round(*own),
+                "best": {"name": other, "score": round(*score)},
+                "gap": round(*gap),
+            })).collect::<Vec<_>>(),
+        }))
+    }
+
     /// `faces.evaluate`: leave-one-out over the library's named faces, to see how well recognition works on *your*
     /// photos and which threshold to trust. Each named face in turn is treated as unknown and ranked against the
     /// other named faces, ignoring those from shots taken within `burstSecs` of it (near-duplicates would make
@@ -554,28 +649,8 @@ mod imp {
             embed_photo(s, *id, &embedder)?;
             done += 1;
         }
-        // every named face with its embedding, the photo it is in, and when that was taken
-        struct Named {
-            name: String,
-            emb: Arc<[f32]>,
-            photo: PhotoId,
-            when: Option<i64>,
-        }
-        let named: Vec<Named> = s
-            .catalog
-            .photos()
-            .filter(|ph| ph.in_library() && in_scope(ph.id))
-            .flat_map(|ph| {
-                let when = ph.captured.as_deref().and_then(capture_secs);
-                ph.meta
-                    .regions
-                    .iter()
-                    .filter(|r| r.kind == RegionKind::Face)
-                    .filter_map(|r| Some(Named { name: r.name.clone()?, emb: s.faces.index.get(ph.id.0, &r.rect)?.clone(), photo: ph.id, when }))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        let near = |a: &Named, b: &Named| a.photo == b.photo || matches!((a.when, b.when), (Some(x), Some(y)) if (x - y).abs() <= burst);
+        let named = named_faces(s, &in_scope);
+        let near = |a: &Named, b: &Named| a.near(b, burst);
         let mut sweep: Vec<(f32, usize, usize)> = thresholds.iter().map(|t| (*t, 0, 0)).collect();
         let (mut queries, mut top1, mut unmatchable) = (0usize, 0usize, 0usize);
         for q in &named {
@@ -1116,6 +1191,10 @@ mod imp {
         Err(bad("faces.evaluate", "this build cannot run face recognition"))
     }
 
+    pub fn doubtful(_: &mut Session, _: &Value) -> Result<Value> {
+        Err(bad("faces.doubtful", "this build cannot run face recognition"))
+    }
+
     pub fn pump(_: &mut Session, _: &Value) -> Result<Value> {
         Ok(serde_json::json!({"active": false}))
     }
@@ -1166,6 +1245,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{budgetMs?: 0, burstSecs?: 5, margin?, thresholds?: [..], scope?: \"visible\"} → {queries, top1, sweep: [{threshold, suggested, correct, precision, recall}]} — leave-one-out over your named faces: each is ranked against the others (ignoring shots within burstSecs of it) to show how well the chosen model recognises people in *your* photos and which threshold to trust. Faces not yet embedded are done within budgetMs (`faces.index` does them all); counts only",
             super::always,
             imp::evaluate
+        ),
+        cmd!(
+            query "faces.doubtful",
+            "Doubtful Faces",
+            [],
+            None,
+            "{name?, burstSecs?: 5, margin?: 0.05, limit?: 200} → {checked, unmatchable, total, faces: [{photo, index, rect, view, name, own, best: {name, score}, gap}]} — the named faces (of `name` only, when given) that look as much like someone else as like their own person's other faces, worst first: each is ranked against the other named faces as `faces.evaluate` does, near-duplicates of it (same photo, shots within burstSecs) left out, and kept when another person comes within `margin` of its own. `own` is its own person's score, `best` the other person's. Reads only: fix a face with `faces.setName`",
+            super::always,
+            imp::doubtful
         ),
         cmd!(
             query "faces.unnamed",

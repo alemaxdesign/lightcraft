@@ -428,6 +428,48 @@ fn unit64(parts: &[(usize, f32)]) -> Vec<f32> {
     v.iter().map(|x| x / n).collect()
 }
 
+/// A mother's face named after her daughter: it looks like the mother's other faces, not the daughter's, so
+/// `faces.doubtful` lists it (with who it looks like) and nothing else, and names nothing.
+#[test]
+fn doubtful_faces_are_the_named_ones_that_look_like_someone_else() {
+    let d = temp("doubtful");
+    let (mut s, _) = setup(&d, 64);
+    s.execute("faces.index", &json!({"budgetMs": 0})).unwrap();
+    let mut ids = s.catalog.photos().map(|p| p.id).collect::<Vec<_>>();
+    ids.sort();
+    assert!(ids.len() >= 11, "the demo library has enough photos");
+    // Ann on photos 0–4, Bob on 5–9 (each a little different from the others), and on photo 10 a face named Ann
+    // that is really Bob
+    let face = |i: usize, base: usize| unit64(&[(base, 1.0), (10 + i, 0.15)]);
+    for (i, id) in ids.iter().take(11).enumerate() {
+        let (name, base) = if i < 5 || i == 10 { ("Ann", if i == 10 { 1 } else { 0 }) } else { ("Bob", 1) };
+        set_regions(&mut s, *id, vec![region(0.1, Some(name))]);
+        s.faces.index.insert(id.0, &region(0.1, None).rect, face(i, base));
+    }
+    let names_before: Vec<_> = ids.iter().map(|id| face_names(&s, *id)).collect();
+    let r = s.execute("faces.doubtful", &json!({"name": "ann", "burstSecs": 0})).unwrap();
+    assert_eq!((r["checked"].clone(), r["total"].clone()), (json!(6), json!(1)), "{r}");
+    let f = &r["faces"][0];
+    assert_eq!(
+        (f["photo"].clone(), f["index"].clone(), f["name"].clone(), f["best"]["name"].clone()),
+        (json!(ids[10].0), json!(0), json!("Ann"), json!("Bob")),
+        "{r}"
+    );
+    assert!(f["best"]["score"].as_f64().unwrap() > f["own"].as_f64().unwrap() && f["gap"].as_f64().unwrap() > 0.0, "{r}");
+    // without a name every named face is checked; Bob's are fine
+    let r = s.execute("faces.doubtful", &json!({"burstSecs": 0})).unwrap();
+    assert_eq!((r["checked"].clone(), r["total"].clone()), (json!(11), json!(1)), "{r}");
+    // a person with one face has nobody to be compared with
+    let r = s.execute("faces.doubtful", &json!({"name": "Nobody"})).unwrap();
+    assert_eq!((r["checked"].clone(), r["total"].clone()), (json!(0), json!(0)));
+    // read only
+    assert_eq!(ids.iter().map(|id| face_names(&s, *id)).collect::<Vec<_>>(), names_before);
+    for p in [json!({"limit": 0}), json!({"limit": u64::MAX}), json!({"margin": "x"}), json!({"burstSecs": -9})] {
+        assert!(s.execute("faces.doubtful", &p).is_ok(), "{p}");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 #[test]
 fn many_faces_are_named_in_one_undo_step() {
     let d = temp("namemany");
