@@ -14,6 +14,9 @@ use super::{Path, PathBuf, ProbeInfo, Session};
 pub const EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "tif", "tiff", "webp", "dng", "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "raf", "orf", "rw2", "rwl", "raw", "pef",
     "srw", "psd", "psb", "jxl", "gif", "bmp",
+    // JPEGs under the endings older cameras and Windows tools wrote (`.JPE` from 2000s scans and
+    // cameras, `.jfif` from browsers); the content is sniffed, so they decode as any JPEG.
+    "jpe", "jfif",
     // Decoded when built with the codecs' `heif` feature; otherwise the import reports them as
     // failed with the reason ("HEIC/HEIF support isn't included in this build").
     "heic", "heif", // AVIF decoding is available in native builds with the codecs' `avif` feature.
