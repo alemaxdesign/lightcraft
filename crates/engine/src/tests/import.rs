@@ -86,6 +86,35 @@ fn recursive_discovery_includes_sony_sr2_and_srf_case_insensitively() {
     std::fs::remove_dir_all(src).unwrap();
 }
 
+/// `.JPE` and `.jfif` are JPEGs under other endings: found in folders, imported, and catalogued as
+/// JPEG (a family archive's 2005 `.JPE` files were silently left out).
+#[test]
+fn jpe_and_jfif_files_are_imported_as_jpeg() {
+    let src = temp_dir("jpe");
+    let (w, h) = (48usize, 32usize);
+    let data: Vec<[u8; 4]> = (0..w * h).map(|i| [(i % w * 5) as u8, (i / w * 7) as u8, 90, 255]).collect();
+    let img = lightcraft_raster::Rgba8 { width: w, height: h, data };
+    let encode = |q: u8| {
+        lightcraft_codecs::encode_jpeg(
+            &lightcraft_codecs::EncodeImage::rgba8(&img),
+            q,
+            lightcraft_codecs::ChromaSubsampling::default(),
+            &lightcraft_codecs::EncodeMeta::default(),
+        )
+        .unwrap()
+    };
+    std::fs::create_dir_all(src.join("scans")).unwrap();
+    std::fs::write(src.join("scans").join("PICT0001.JPE"), encode(80)).unwrap();
+    std::fs::write(src.join("download.jfif"), encode(70)).unwrap();
+    let found = crate::import::expand(&[src.to_string_lossy().into_owned()], None);
+    assert_eq!(found.len(), 2, "{found:?}");
+    let mut s = Session::new().with_fs();
+    let r = s.execute("library.import", &json!({"paths": [src.to_string_lossy()]})).unwrap();
+    assert_eq!((ids(&r, "imported"), ids(&r, "failed")), (2, 0), "{r}");
+    assert!(s.catalog.photos().all(|p| p.format == "JPEG" && (p.width, p.height) == (48, 32)));
+    std::fs::remove_dir_all(src).unwrap();
+}
+
 #[test]
 fn recursive_import_with_duplicates() {
     let src = temp_dir("src");

@@ -214,7 +214,7 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
         lightcraft_meta::upright_regions(&mut meta.regions, drawn_on, o, (header.width, header.height));
     }
     let format = match ext_upper(name).as_str() {
-        "JPG" | "JPEG" => "JPEG".to_string(),
+        "JPG" | "JPEG" | "JPE" | "JFIF" => "JPEG".to_string(),
         "" => format!("{fmt:?}").to_uppercase(),
         e => e.to_string(),
     };
