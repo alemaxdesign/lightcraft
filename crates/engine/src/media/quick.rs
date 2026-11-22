@@ -135,13 +135,20 @@ pub(super) fn embedded_thumb_key(k: Hash128) -> Hash128 {
 /// out even before catalog rechecking finishes, and distinguish sensor from preview-only
 /// pixels after Reload. Other formats keep their existing keys. This is deliberately not
 /// part of `content_key`: smart previews and denoise products identify the original file.
+///
+/// HEIC / HEIF decoding changed when a container without `irot` / `imir` started following its
+/// EXIF Orientation: thumbnails and renders cached before were sideways for those files, and the
+/// file's content (the rest of the key) didn't change, so they are made afresh once.
 pub(super) fn decoder_key(p: &Photo) -> u64 {
-    if !p.format.eq_ignore_ascii_case("ORF") {
+    let h = if p.format.eq_ignore_ascii_case("ORF") {
+        // Spread the status bit: this salt is XORed with frontend dimensions, so adjacent
+        // integers could cancel a small resize occurring at the same time as a recheck.
+        Hasher128::new().str("orf-withdrawal-v1").u64(u64::from(p.preview_only.is_some())).finish()
+    } else if ["HEIC", "HEIF", "HIF"].iter().any(|f| p.format.eq_ignore_ascii_case(f)) {
+        Hasher128::new().str("heif-exif-orientation-v1").finish()
+    } else {
         return 0;
-    }
-    // Spread the status bit: this salt is XORed with frontend dimensions, so adjacent
-    // integers could cancel a small resize occurring at the same time as a recheck.
-    let h = Hasher128::new().str("orf-withdrawal-v1").u64(u64::from(p.preview_only.is_some())).finish();
+    };
     ((h.0 as u64) ^ ((h.0 >> 64) as u64)) | 1
 }
 
@@ -215,5 +222,25 @@ fn header_info(p: &Photo) -> SourceInfo {
         }
     } else {
         SourceInfo::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn photo(format: &str) -> Photo {
+        Photo::new(PhotoId(1), Source::File { path: "/photos/1.x".into() }, "1.x", format, 600, 400, "2026-10-01T00:00:00")
+    }
+
+    /// Cached HEIC thumbnails made before the EXIF-orientation fix were sideways; a new decoder key keeps them out.
+    #[test]
+    fn heic_has_its_own_decoder_key_and_other_formats_keep_theirs() {
+        let heic = decoder_key(&photo("HEIC"));
+        assert_ne!(heic, 0);
+        assert_eq!(decoder_key(&photo("heif")), heic);
+        assert_ne!(source_identity(&photo("HEIC")), source_identity(&photo("JPEG")));
+        assert_eq!(decoder_key(&photo("JPEG")), 0);
+        assert_ne!(decoder_key(&photo("ORF")), heic);
     }
 }
